@@ -12,7 +12,7 @@ const database = {
 			id: '121',
 			name: 'Alan',
 			email: 'alanwu4321@gmail.com',
-			password: 'Alanwu131441',
+			password: 'Alanwu1111',
 			entries: 0,  //track score, how many time he/she has submiited
 			joined: new Date(), //john join the app 
 
