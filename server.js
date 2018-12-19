@@ -1,173 +1,99 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const app = express();
 const bcrypt = require('bcrypt-nodejs');
 const cors = require('cors');
+const knex = require('knex')
 
-app.use(bodyParser.json());
-app.use(cors());
-const database = {
-	users: [
-		{
-			id: '121',
-			name: 'Alan',
-			email: 'alanwu4321@gmail.com',
-			password: 'Alanwu1111',
-			entries: 0,  //track score, how many time he/she has submiited
-			joined: new Date(), //john join the app 
-
-		},
-		{
-		id: '122',
-		name: 'john4',
-		email: 'alanwu43210@gmail.com',
-		password: 'banana',
-		entries: 0,
-		joined: new Date(),
-
-	},
-
-
-	],
-
-}
-app.get('/',(req,res) => {
-
-	res.send(database.users)
-})
-
-
-app.post('/signin', (req,res) => {
-
-	if (req.body.email === database.users[0].email && req.body.password === database.users[0].password) {
-
-
-		res.json(database.users[0])
-	}  
-
-	else {
-
-
-		res.status(400).json('error singing in')
-	}
-
-})
-
-app.post('/register',(req,res)=>{
-
-
-const {email,name,password} =req.body; 
-
-bcrypt.hash(password,null,null,function(err,hash){
-
-	console.log(hash);
-} )
-
-database.users.push ({
-
-		id: '125',
-		name: name,
-		email: email,
-		password: password,
-		entries: 0,
-		joined: new Date(),
-
-})
-
-res.json(database.users[database.users.length-1])
-
-
-
-})
-
-
-app.get('/profile/:id',(req,res) => {
-
-const {id} = req.params;
-let found = false;
-
-database.users.forEach(user => {
-
-console.log(user.id, 'user id')
-console.log(id, 'param')
-
-
-if(user.id === id){
-
-	console.log(user.id, 'user id','from if')
-console.log(id, 'param', 'from if')
-	found = true;
-	return res.json(user);
-	
-}
-
-
+const db = knex({
+  client: 'pg',
+  connection: {
+    host : '127.0.0.1',
+    user : 'aneagoie',
+    password : '',
+    database : 'smart-brain'
+  }
 });
 
-if (!found) {
+const app = express();
 
-	res.status(404).json('no such user');
-}
+app.use(cors())
+app.use(bodyParser.json());
 
-
+app.get('/', (req, res)=> {
+  res.send(database.users);
 })
 
-
-app.put('/image',(req,res) => {
-
-const {id} = req.body;
-let found = false;
-
-database.users.forEach(user => {
-
-
-if(user.id === id){
-
-
-	found = true;
-	user.entries ++
-	return res.json(user.entries);
-	
-}
-
-
+app.post('/signin', (req, res) => {
+  db.select('email', 'hash').from('login')
+    .where('email', '=', req.body.email)
+    .then(data => {
+      const isValid = bcrypt.compareSync(req.body.password, data[0].hash);
+      if (isValid) {
+        return db.select('*').from('users')
+          .where('email', '=', req.body.email)
+          .then(user => {
+            res.json(user[0])
+          })
+          .catch(err => res.status(400).json('unable to get user'))
+      } else {
+        res.status(400).json('wrong credentials')
+      }
+    })
+    .catch(err => res.status(400).json('wrong credentials'))
 })
 
-if (!found) {
-
-	res.status(404).json('no such user');
-}
-
-
-
-
-
-
+app.post('/register', (req, res) => {
+  const { email, name, password } = req.body;
+  const hash = bcrypt.hashSync(password);
+    db.transaction(trx => {
+      trx.insert({
+        hash: hash,
+        email: email
+      })
+      .into('login')
+      .returning('email')
+      .then(loginEmail => {
+        return trx('users')
+          .returning('*')
+          .insert({
+            email: loginEmail[0],
+            name: name,
+            joined: new Date()
+          })
+          .then(user => {
+            res.json(user[0]);
+          })
+      })
+      .then(trx.commit)
+      .catch(trx.rollback)
+    })
+    .catch(err => res.status(400).json('unable to register'))
 })
 
-app.listen(3000, ()=>{
-console.log('Success on port 3000')
+app.get('/profile/:id', (req, res) => {
+  const { id } = req.params;
+  db.select('*').from('users').where({id})
+    .then(user => {
+      if (user.length) {
+        res.json(user[0])
+      } else {
+        res.status(400).json('Not found')
+      }
+    })
+    .catch(err => res.status(400).json('error getting user'))
 })
 
+app.put('/image', (req, res) => {
+  const { id } = req.body;
+  db('users').where('id', '=', id)
+  .increment('entries', 1)
+  .returning('entries')
+  .then(entries => {
+    res.json(entries[0]);
+  })
+  .catch(err => res.status(400).json('unable to get entries'))
+})
 
-
-
-
-
-
-/*
-
-post man is the app (front end)
-
-// res = this os working
-
-
-/signin --> POST (sned ps through HTTPS not a body) = success/fail 
-
-/register --> POST (Creating) = user
-
-/profile/:userId(paramenter of user id) --> GET = user 
-
-/image --> PUT (updating) --> user (object updated*)
-
-*/
+app.listen(3000, ()=> {
+  console.log('app is running on port 3000');
+})
